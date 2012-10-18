@@ -6,8 +6,26 @@ Vagrant::Config.run do |config|
   # options are documented and commented below. For a complete reference,
   # please see the online documentation at vagrantup.com.
 
+  config.vm.define :web1 do |web1|
+    web1.vm.box = "lucid32"
+    web1.vm.network :hostonly, "10.0.1.41"
+    web1.vm.provision :puppet do |puppet|
+      puppet.manifests_path = "manifests"
+      puppet.manifest_file  = "webserver.pp"
+    end
+  end
+
+  config.vm.define :web2 do |web2|
+    web2.vm.box = "lucid32"
+    web2.vm.network :hostonly, "10.0.1.42"
+    web2.vm.provision :puppet do |puppet|
+      puppet.manifests_path = "manifests"
+      puppet.manifest_file  = "webserver.pp"
+    end
+  end
+
   # Every Vagrant virtual environment requires a box to build off of.
-  config.vm.box = "lucid32"
+  # config.vm.box = "lucid32"
 
   # The url from where the 'config.vm.box' box will be fetched if it
   # doesn't already exist on the user's system.
@@ -54,10 +72,6 @@ Vagrant::Config.run do |config|
   # #               Managed by Puppet.\n"
   # # }
   #
-  config.vm.provision :puppet do |puppet|
-    puppet.manifests_path = "manifests"
-    puppet.manifest_file  = "webserver.pp"
-  end
 
   # Enable provisioning with chef solo, specifying a cookbooks path, roles
   # path, and data_bags path (all relative to this Vagrantfile), and adding 
