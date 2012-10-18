@@ -5,3 +5,5 @@ exec { "apt-get update":
 package { "apache2":
   ensure => present,
 }
+
+include vim

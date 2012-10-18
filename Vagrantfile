@@ -24,6 +24,15 @@ Vagrant::Config.run do |config|
     end
   end
 
+  config.vm.define :balancer do |balancer|
+    balancer.vm.box = "lucid32"
+    balancer.vm.network :hostonly, "10.0.1.40"
+    balancer.vm.provision :puppet do |puppet|
+      puppet.manifests_path = "manifests"
+      puppet.manifest_file  = "balancer.pp"
+    end
+  end
+
   # Every Vagrant virtual environment requires a box to build off of.
   # config.vm.box = "lucid32"
 
