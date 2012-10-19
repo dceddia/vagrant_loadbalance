@@ -113,5 +113,12 @@
   </ul>
   <p>2 webservers seems to actually run slower than 1. I think this is due to my laptop only having 2 cores. If I watch Activity Monitor, I see that if the webservers are using X% CPU, the load balancer is using 2X% or more. For example, a few runs of <code>ab -n 1000 http://10.0.1.40/</code> showed the balancer using 78% cpu and the webservers using 25% each. ab is running on the same machine it will sometimes appear using 58% cpu.</p>
   <p>In fact, it seems that when ab has a "slow run", it appears with a high CPU usage. On the faster runs, only the VMs appear with high CPU usage, and ab is using about 10%. This could be due to the OS's scheduling choices, but it could also just be that since the slower runs take longer, there is more time for it to appear at the top of Activity Monitor's list. ab's manpage does warn that it may have some performance problems, <code>"i.e., you would measure the ab performance rather than the server's"</code>.</p> 
+  <p>Looking on the webserver VM itself, when it's the only one serving requests, <code>top</code> shows 3 apache processes using about 10% CPU each. <code>ps ax | grep apache</code> shows 5 processes running, however.</p>
+  
+  <h2>Tuning</h2>
+  <p>I took a quick stab at tuning the servers but didn't see any change when I reran the same tests as above.</p>
+  <p>Following some suggestions from <a href="http://drupal.org/node/215516">here</a>, I modified the apache config as they suggested. It sounded like their old server isn't too much slower than my VM instance, so I tried their settings. After restarting apache and retrying some of the tests with ab, the results were largely the same.</p>
+  <p>I also tried setting <code>maxconn 200</code> for each server in haproxy, and this also did not seem to have an effect.</p>
+  <p>My conclusion after this limited tuning attempt is that I'm probably not tuning the right parameters. It also might be that my dual-core laptop is just not powerful enough to handle more than ~1000 requests/second.</p>
 </body>
 </html>
