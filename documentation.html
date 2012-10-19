@@ -1,0 +1,117 @@
+<html>
+<head>
+  <title>Documentation</title>
+  <style type="text/css">
+    body {
+      font-family: "Helvetica", arial, sans-serif;
+    }
+  </style>
+</head>
+<body>
+  <h2>Initial Thoughts</h2>
+  <p>Given the requirements, and the suggested packages to use, I investigated those first. I had heard of VirtualBox before, and even used it a little, but had never heard of Vagrant. It looked like a good way to go -- especially since the first thing I thought of with VirtualBox was &quot;I wonder if I can script it...&quot;. I'm glad that part was done for me :)</p>
+  <p>I've had experience setting up apache before, so I went that route. For the load balancer, I'd never used haproxy or nginx before, but had heard of both as being fast. Since it seemed like haproxy was more geared toward load-balancing than being a generic webserver + load balancer, I went with haproxy.</p>
+  <p>For the simple scripts I envisioned I'd use bash combined with curl and ssh.</p>
+  <p>I had tried out Puppet last week, and had gotten through some of the very basics, so it seemed like a good way to go for the configuration management.</p>
+  <p>Looking at what I had to do, setting up haproxy seemed like the largest unknown in terms of time. It turned out that haproxy and Puppet were the two things that took the most debugging time.</p>
+  
+  <h2>Setup Steps</h2>
+  <ul>
+    <li>Installed VirtualBox and Vagrant</li>
+    <li>Followed Vagrant's <a href="http://vagrantup.com/v1/docs/getting-started/index.html">getting started guide</a> to download the base box.</li>
+    <li>Created a git repository (also on github here: <a href="https://github.com/dceddia/vagrant_loadbalance">https://github.com/dceddia/vagrant_loadbalance</a>) to track changes to the Vagrant configuration</li>
+    <li>Before going after 2 webservers, I started with one. Created a <code>manifests</code> directory inside the Vagrant project, and made a new puppet file called <code>webserver.pp</code></li>
+    <li>Ran <code>vagrant up</code>, saw that apache was installed and started up</li>
+    <li>With one webserver working, I moved on to getting two up and running. Vagrant's documentation discusses how to create a multi-VM setup, so I followed their lead and updated my <code>Vagrantfile</code> to have 2 webservers named web1 and web2, both using the same Puppet file for provisioning, and using IPs 10.0.1.41 and 10.0.1.42. I chose those IPs since they were not too common (10.0.0.x) and still easy to type compared to 192.168.x.x.</li>
+    <li>Ran <code>vagrant destroy</code> and <code>vagrant up</code> to get 2 fresh VMs running. Verified that I could ssh into both of them with <code>vagrant ssh web[1|2]</code></li>
+    <li>Then added a third VM named &quot;balancer&quot; with the haproxy package installed via Puppet, stored in <code>balancer.pp</code>. It has the IP 10.0.1.40.</li>
+    <li>Googled around for info about haproxy configuration</li>
+    <li>Realized the VMs don't come preinstalled with vim. Decided to fix this by making a <code>vim.pp</code> file with a vim class and including that class in <code>balancer.pp</code> and <code>webserver.pp</code></li>
+    <li>Recreated the VMs with <code>vagrant destroy</code> / <code>vagrant up</code>. Realized that Vagrant is not particulary quick.</li>
+    <li>The default <code>haproxy.cfg</code> came with a ton of example configurations that seem like overkill, so I removed all but the simplest-looking one and set it up to roundrobin balance between the 2 webservers. It looked like this:
+      <pre>
+        listen	balancer 0.0.0.0:80
+      	     balance	roundrobin
+      	     server	web1 10.0.1.41:80
+      	     server	web2 10.0.1.42:80</pre>
+    </li>
+    <li>Starting haproxy with <code>/etc/init.d/haproxy start</code> didn't seem to work. There was no feedback and <code>ps ax | grep haproxy</code> returned nothing.</li>
+    <li>Starting it manually, however, worked fine. <code>sudo haproxy -f /etc/haproxy/haproxy.cfg</code> got it going.</li>
+    <li>At this point something should've been working, so I pointed my browser to http://10.0.1.40 and it came up with Apache's &quot;It works!&quot; page. Great!</li>
+    <li>Not sure about why haproxy didn't start, I thought maybe it'd start itself on boot magically, and decided to try getting Puppet to copy in my customized <code>haproxy.cfg</code>.</li>
+    <li>After some Googling, it seemed that the preferred way to have Puppet copy files was to create a puppet <code>file</code> resource with <code>source => puppet:///modules/&lt;something&gt;/your_file</code>. I tried a number of things to get this to work:
+      <ul>
+        <li>In the Vagrantfile, setting <code>puppet.module_path = "modules"</code>, then making a <code>modules</code> directory in my Vagrant project directory (alongside <code>manifests</code>). Created <code>modules/haproxy/haproxy.cfg</code> and filled it with my modified version. Made a puppet <code>file</code> resource with <code>source => "puppet:///modules/haproxy/haproxy.cfg-dist"</code>. Puppet didn't find the file, and gave some cryptic error: <code>err: /Stage[main]//File[/etc/default/haproxy]: Could not evaluate: Could not retrieve information from environment production source(s) puppet:///modules/haproxy/haproxy.cfg-dist at /tmp/vagrant-puppet/manifests/balancer.pp:26</code></li>
+        <li>Tried putting the config file directly in <code>modules/haproxy.cfg</code>, but that didn't work either.</li>
+        <li>Tried pointing the file resource to a nonexistent source file "foo" and got the same error, so it definitely seemed like Puppet wasn't finding the file.</li>
+        <li>Tried manually ssh'ing into the VM and running <code>puppet apply --modulepath=/tmp/vagrant-puppet/modules-0 balancer.pp</code> from within <code>/tmp/vagrant-puppet/manifests</code>.</li>
+        <li>My Googling last night didn't find this article, but this looks like it would have helped: <a href="http://java.dzone.com/articles/serving-files-puppet">http://java.dzone.com/articles/serving-files-puppet</a>. I think it's saying that the puppet:/// URIs require a file server, and in lieu of a real server, you can tell puppet to use a directory instead. Since things are working now, I think I'll leave it alone, but this could be a future improvement.</li>
+      </ul>
+    </li>
+    <li>At this point I gave up on the modules idea, and pointed the file resource directly at <code>/vagrant/haproxy/haproxy.cfg-dist</code>, where I knew it would exist (after I copied it there).</li>
+    <li>That worked! But haproxy still did not start on boot or with the init script</li>
+    <li>I looked at the init script (<code>/etc/init.d/haproxy</code>), and saw that it executed <code>/etc/default/haproxy</code>. Looked at that, and it had a line <code>ENABLE=0</code>. I have no idea why.</li>
+    <li>I changed this to <code>ENABLE=1</code> and now the init script started haproxy successfully.</li>
+    <li>Created another file resource in balancer's puppet manifest to copy over a modified <code>/etc/default/haproxy</code></li>
+    <li>Destroying and restarting the VMs now resulted in a working balancer</li>  
+  </ul>
+  
+  <h2>Testing</h2>
+  <p>I made a script to continuously request the index page from the load balancer's IP and report whether the site was up or down. I also made a script to start and stop apache given a VM name (i.e. <code>./serverctl.sh web1 start</code>).</p>
+  <p>The poll script reported the site was UP just fine, but when both webservers were down, it kept saying UP. I had to read the curl manpage to learn about the -f flag to make curl exit with a non-zero return code if an error page was encountered. I had assumed that'd be the default mode.</p>
+  <p>So now, I could start the continuous poll script and take one webserver down, and see that the poller said the site was still UP!</p>
+  <p>However, it seemed very slow, as if every other request was trying the dead server and timing out.</p>
+  <p>I looked at haproxy's configuration some more, specifically the <code>server</code> lines, and learned about the <code>check</code> option. It was there in the default config but I had removed it to start with as simple of a config as possible. Oops. So I put that back, along with some default options for it.</p>
+  <p>Now the balancer would quickly service requests when at least one server was up. When one went down, the next request seemed slow, presumably because the balancer was just learning that one of the servers died.</p>
+  
+  <h2>Benchmarking with ab</h2>
+  <p>Using apachebench, I tried testing the cluster with both webservers running and with only one running. Here are a few of the tests I tried:</p>
+  <p>My laptop is a Macbook 13" with a 2.4GHz Core 2 Duo and 4GB RAM. The 3 VMs and ab are all running on this machine.</p>
+  <ul>
+    <li>With only web1 running:
+      <ul>
+        <li><code>ab -n 1000 http://10.0.1.40/</code></li>
+        <li>Sometimes reports ~150 requests/sec.</li>
+        <li>Sometimes reports ~450 requests/sec.</li>
+        <br/>
+        <li><code>ab -n 1000 -c 15 http://10.0.1.40/</code></li>
+        <li>Sometimes reports ~300 requests/sec.</li>
+        <li>Sometimes reports ~900 requests/sec.</li>
+        <li>I can run it 3 times in a row getting 300 reqs/sec, then 3 times getting 900 reqs/sec. I'm not sure why it varies like this, with no other changes.</li>
+        <li>On the slow runs, the mean time per request is ~53ms. On the fast ones, it's more like 15ms.</li>
+        <br/>
+        <li><code>ab -n 1000 -c 50 http://10.0.1.40/</code></li>
+        <li>Sometimes reports ~350 requests/sec.</li>
+        <li>Sometimes reports ~1025 requests/sec.</li>
+        <br/>
+        <li><code>ab -n 1000 -c 100 http://10.0.1.40/</code></li>
+        <li>Sometimes reports ~350 requests/sec.</li>
+        <li>Sometimes reports ~1050 requests/sec.</li>
+        <li>Increasing concurrency seems to have diminishing returns at this point</li>
+      </ul>
+    </li>
+    <br/>
+    <li>With both servers running:
+      <ul>
+        <li><code>ab -n 1000 http://10.0.1.40/</code></li>
+        <li>Sometimes reports ~130 requests/sec.</li>
+        <li>Sometimes reports ~400 requests/sec.</li>
+        <br/>
+        <li><code>ab -n 1000 -c 15 http://10.0.1.40/</code></li>
+        <li>Sometimes reports ~300 requests/sec.</li>
+        <li>Sometimes reports ~825 requests/sec.</li>
+        <br/>
+        <li><code>ab -n 1000 -c 50 http://10.0.1.40/</code></li>
+        <li>Sometimes reports ~320 requests/sec.</li>
+        <li>Sometimes reports ~950 requests/sec.</li>  
+        <br/>
+        <li><code>ab -n 1000 -c 100 http://10.0.1.40/</code></li>
+        <li>Sometimes reports ~350 requests/sec.</li>
+        <li>Sometimes reports ~950 requests/sec.</li>
+      </ul>
+    </li>
+  </ul>
+  <p>2 webservers seems to actually run slower than 1. I think this is due to my laptop only having 2 cores. If I watch Activity Monitor, I see that if the webservers are using X% CPU, the load balancer is using 2X% or more. For example, a few runs of <code>ab -n 1000 http://10.0.1.40/</code> showed the balancer using 78% cpu and the webservers using 25% each. ab is running on the same machine it will sometimes appear using 58% cpu.</p>
+  <p>In fact, it seems that when ab has a "slow run", it appears with a high CPU usage. On the faster runs, only the VMs appear with high CPU usage, and ab is using about 10%. This could be due to the OS's scheduling choices, but it could also just be that since the slower runs take longer, there is more time for it to appear at the top of Activity Monitor's list. ab's manpage does warn that it may have some performance problems, <code>"i.e., you would measure the ab performance rather than the server's"</code>.</p> 
+</body>
+</html>
